@@ -1,0 +1,22 @@
+# C++ build artifacts
+model.exe
+model
+
+# Simulation generated test vectors
+input_vectors.txt
+expected_output.txt
+actual_output.txt
+
+# GTKWave / Verilog dumps
+dump.vcd
+*.vvp
+
+# ModelSim / QuestaSim working directories and logs
+work/
+transcript
+*.wlf
+modelsim.ini
+
+# Python caches
+__pycache__/
+*.pyc
