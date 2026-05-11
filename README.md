@@ -46,7 +46,7 @@ stateDiagram-v2
 
 I don't trust waveform-only verification for something like this. Instead there's a text-based regression flow that proves correctness:
 
-![Verification Architecture](docs/verification_flow.png)
+![Verification Flow](docs/verification_flow.png)
 
 
 **How it works:**
