@@ -23,25 +23,6 @@ The memory is a LUTRAM array that stores `{tlast, tkeep, tdata}` packed together
 
 ![FIFO Architecture](docs/architecture.png)
 
-```mermaid
-stateDiagram-v2
-    [*] --> EMPTY: reset
-    EMPTY --> FILLING: write
-    FILLING --> FILLING: read / write
-    FILLING --> FULL: wr_ptr wraps, addrs match
-    FILLING --> EMPTY: rd_ptr catches up
-    FULL --> FILLING: read
-
-    note right of FULL
-        full = (wr_ptr[MSB] != rd_ptr[MSB])
-             & (wr_ptr[ADDR] == rd_ptr[ADDR])
-    end note
-
-    note right of EMPTY
-        empty = (wr_ptr == rd_ptr)
-    end note
-```
-
 ## Verification
 
 I don't trust waveform-only verification for something like this. Instead there's a text-based regression flow that proves correctness:
