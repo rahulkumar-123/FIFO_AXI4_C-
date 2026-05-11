@@ -46,28 +46,8 @@ stateDiagram-v2
 
 I don't trust waveform-only verification for something like this. Instead there's a text-based regression flow that proves correctness:
 
-```mermaid
-flowchart TD
-    A["C++ Model\n(model.cpp)"] -->|generates| B["input_vectors.txt\n500 random AXI4 beats"]
-    A -->|generates| C["expected_output.txt"]
+![Verification Architecture](docs/verification_flow.png)
 
-    D["Python Runner\n(test_runner.py)"] -->|compiles & runs| A
-    D -->|launches| E["Vivado / ModelSim"]
-
-    E --> F["tb_fifo.v"]
-    F -->|reads| B
-    F -->|randomized backpressure\n70% tvalid / 60% tready| G["fifo_sync_axi4s.v"]
-    G -->|writes| H["actual_output.txt"]
-
-    I{"line-by-line diff"} -->|reads| C
-    I -->|reads| H
-    I --> J["✅ all txns matched"]
-
-    style A fill:#4a9,color:#fff
-    style D fill:#48c,color:#fff
-    style G fill:#e84,color:#fff
-    style J fill:#4a9,color:#fff
-```
 
 **How it works:**
 
