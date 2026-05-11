@@ -21,34 +21,83 @@ def compile_and_run_cpp():
     print(res.stdout)
     return True
 
-def run_verilog_simulation():
-    print("checking vlog...")
-    try:
-        subprocess.run(["vlog", "-version"], capture_output=True, check=True)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        print("warn: vlog not found. run manually.")
-        return False
-        
-    print("vlib work...")
-    subprocess.run(["vlib", "work"], capture_output=True, text=True)
-        
-    print("compiling rtl...")
-    res = subprocess.run(["vlog", "fifo_sync_axi4s.v", "tb_fifo.v"], capture_output=True, text=True)
+def _run(cmd, **kwargs):
+    """subprocess.run wrapper — uses shell=True on Windows for .bat support."""
+    return subprocess.run(cmd, shell=(sys.platform == "win32"), **kwargs)
+
+def find_simulator():
+    """Auto-detect available simulator: Vivado first, then ModelSim."""
+    import shutil
+    if shutil.which("xvlog"):
+        return "vivado"
+    if shutil.which("vlog"):
+        return "modelsim"
+    return None
+
+def run_vivado_sim():
+    """Run simulation using Vivado's xvlog -> xelab -> xsim flow."""
+    print("compiling rtl (xvlog)...")
+    res = _run(["xvlog", "fifo_sync_axi4s.v", "tb_fifo.v"], capture_output=True, text=True)
     if res.returncode != 0:
-        print("rtl compile failed:")
+        print("xvlog compile failed:")
+        print(res.stdout)
         print(res.stderr)
         return False
-        
-    print("simulating...")
+
+    print("elaborating (xelab)...")
+    res = _run(["xelab", "tb_fifo_sync_axi4s", "-s", "fifo_sim", "-debug", "typical"],
+               capture_output=True, text=True)
+    if res.returncode != 0:
+        print("xelab failed:")
+        print(res.stdout)
+        print(res.stderr)
+        return False
+
+    print("simulating (xsim)...")
+    res = _run(["xsim", "fifo_sim", "--runall"], capture_output=True, text=True)
+    if res.returncode != 0:
+        print("xsim failed:")
+        print(res.stdout)
+        print(res.stderr)
+        return False
+
+    print("sim done.")
+    return True
+
+def run_modelsim_sim():
+    """Run simulation using ModelSim's vlog → vsim flow."""
+    print("vlib work...")
+    subprocess.run(["vlib", "work"], capture_output=True, text=True)
+
+    print("compiling rtl (vlog)...")
+    res = subprocess.run(["vlog", "fifo_sync_axi4s.v", "tb_fifo.v"], capture_output=True, text=True)
+    if res.returncode != 0:
+        print("vlog compile failed:")
+        print(res.stderr)
+        return False
+
+    print("simulating (vsim)...")
     res = subprocess.run(["vsim", "-c", "-do", "run -all; quit", "tb_fifo_sync_axi4s"], capture_output=True, text=True)
     if res.returncode != 0:
         print("sim failed:")
         print(res.stdout)
         print(res.stderr)
         return False
-        
+
     print("sim done.")
     return True
+
+def run_verilog_simulation():
+    sim = find_simulator()
+    if sim is None:
+        print("err: no simulator found. install Vivado or ModelSim and add to PATH.")
+        return False
+
+    print(f"using {sim}...")
+    if sim == "vivado":
+        return run_vivado_sim()
+    else:
+        return run_modelsim_sim()
 
 def compare_results():
     print("checking txns...")

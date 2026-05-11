@@ -29,6 +29,10 @@ module tb_fifo_sync_axi4s;
     wire                  almost_full;
     wire                  almost_empty;
 
+    // tap internal signals for waveform visibility
+    wire                  fifo_full  = dut.full;
+    wire                  fifo_empty = dut.empty;
+
     // DUT Instantiation
     fifo_sync_axi4s #(
         .DATA_WIDTH(DATA_WIDTH),

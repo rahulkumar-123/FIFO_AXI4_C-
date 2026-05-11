@@ -1,52 +1,125 @@
 # AXI4-Stream Synchronous FIFO
 
-A production-grade, highly parameterizable Synchronous FIFO written in Verilog, designed specifically for high-throughput FPGA and ASIC data pipelines. It natively supports the AMBA AXI4-Stream protocol and employs a cycle-accurate C++ Golden Model text-regression verification flow to mathematically guarantee zero data corruption.
+![Verilog](https://img.shields.io/badge/HDL-Verilog-blue?style=for-the-badge)
+![AXI4-Stream](https://img.shields.io/badge/Protocol-AXI4--Stream-orange?style=for-the-badge)
+![Verification](https://img.shields.io/badge/Verified-Golden_Model-brightgreen?style=for-the-badge)
+![Sim](https://img.shields.io/badge/Sim-Vivado%20%7C%20ModelSim-purple?style=for-the-badge)
 
-I built this IP because I needed a rock-solid, drop-in replacement for vendor-locked FIFO generators (like Xilinx/Intel IP cores). The architecture focuses on minimal latency, combinatorial exactness for status flags, and rigorous verification.
+Parameterizable synchronous FIFO in Verilog with a native AXI4-Stream interface (`tvalid`/`tready` handshake, `tlast`, `tkeep`). Verified against a C++ golden model — 500 randomized transactions, zero mismatches.
 
-## Core Features
+## What It Does
 
-- **AXI4-Stream Native:** Full handshake (`tvalid` / `tready`) compatibility built straight into the core logic, ensuring lossless byte streaming out of the box.
-- **Sideband Tiers:** Properly handles End-of-Packet `tlast` boundaries as well as variable-width byte enables via `tkeep` on closing transactions.
-- **Programmable Thresholds:** Look-ahead tracking combinatorial logic to assert `almost_full` and `almost_empty` limits, giving upstream MACs/pipelined modules time to react before backpressure forces a drop.
-- **Strictly Synchronous:** Complies exactly with the AXI spec by enforcing active-low synchronous resets across the board. No sketchy asynchronous reset timing violations.
-- **FWFT Behavior:** First-Word Fall-Through. Data is valid on the master output exactly when `tvalid` goes high, saving a continuous clock cycle of tracking overhead on the receiving end.
+- AXI4-Stream slave/master ports with proper backpressure handling
+- `tlast` packet boundaries and `tkeep` byte-enable masks on partial transfers
+- Programmable `almost_full` / `almost_empty` thresholds so upstream logic can react before hitting the wall
+- Synchronous active-low reset (no async reset nonsense)
+- First-Word Fall-Through — data shows up on the output the same cycle `tvalid` asserts, no extra read latency
 
-## The Architecture
-The module relies on dual augmented pointers (`rd_ptr` and `wr_ptr`) utilizing the extra MSB hardware approach. This avoids costly internal division or modulo logic when tracking circular wraparounds in the RAM.
+## Architecture
 
-By instantiating a localized parameterizable LUTRAM (`mem`), data payload, `tkeep` bitmasks, and `tlast` markers are unified, written, and extracted synchronously on the rising clock edge perfectly coupled with the handshake conditionals.
+Internally it's a circular buffer with dual pointers (`wr_ptr`, `rd_ptr`) that are one bit wider than the address space. The extra MSB handles wraparound detection without needing modulo arithmetic — `full` is when the addresses match but the MSBs differ, `empty` is when both pointers are identical.
 
-## Verification & Golden Model
+The memory is a LUTRAM array that stores `{tlast, tkeep, tdata}` packed together. Reads are combinatorial (FWFT), writes are synchronous on the clock edge gated by the handshake.
 
-Testing generic FIFOs via eyeball-waveforms doesn't prove anything at scale. I wrote a deterministic, text-backed regression test suite instead.
+![FIFO Architecture](docs/architecture.png)
 
-### The C++ Reference Model (`model.cpp`)
-The C++ program serves as the absolute "Golden State."
-1. It generates hundreds of randomized AXI4-Stream payload bursts.
-2. It randomizes the probability of `tlast` packet boundaries and dynamically calculates randomized valid byte masks for `tkeep` partial word transfers.
-3. It pushes the data through an idealized C++ `std::queue`.
-4. It dumps the stimuli to `input_vectors.txt` and the verified expected results to `expected_output.txt`.
+```mermaid
+stateDiagram-v2
+    [*] --> EMPTY: reset
+    EMPTY --> FILLING: write
+    FILLING --> FILLING: read / write
+    FILLING --> FULL: wr_ptr wraps, addrs match
+    FILLING --> EMPTY: rd_ptr catches up
+    FULL --> FILLING: read
 
-### The Simulation Execution (`test_runner.py` & `tb_fifo.v`)
-A Python orchestrator script runs the entire sequence automatically:
-1. Compiles the C++ model and generates the vectors.
-2. Spins up the **ModelSim** `vlog` and `vsim` engines.
-3. Feeds the Verilog testbench the text-based stimuli. 
-4. The Verilog testbench (`tb_fifo.v`) randomizes hardware-level delays on the `tvalid` and `tready` ports to mimic unpredictable bus arbitration stalls.
-5. Captures the physical cycle-accurate hardware output to `actual_output.txt`.
-6. Does a complete 1:1 cross-comparison string evaluation proving the hardware matches the ideal C++ queue perfectly.
+    note right of FULL
+        full = (wr_ptr[MSB] != rd_ptr[MSB])
+             & (wr_ptr[ADDR] == rd_ptr[ADDR])
+    end note
 
-## Quick Start
+    note right of EMPTY
+        empty = (wr_ptr == rd_ptr)
+    end note
+```
 
-You will need `g++`, Python 3, and ModelSim (or any Verilog standard simulator via tweaking `test_runner.py`) installed.
+## Verification
 
-Execute the whole test flow with one command:
+I don't trust waveform-only verification for something like this. Instead there's a text-based regression flow that proves correctness:
+
+```mermaid
+flowchart TD
+    A["C++ Model\n(model.cpp)"] -->|generates| B["input_vectors.txt\n500 random AXI4 beats"]
+    A -->|generates| C["expected_output.txt"]
+
+    D["Python Runner\n(test_runner.py)"] -->|compiles & runs| A
+    D -->|launches| E["Vivado / ModelSim"]
+
+    E --> F["tb_fifo.v"]
+    F -->|reads| B
+    F -->|randomized backpressure\n70% tvalid / 60% tready| G["fifo_sync_axi4s.v"]
+    G -->|writes| H["actual_output.txt"]
+
+    I{"line-by-line diff"} -->|reads| C
+    I -->|reads| H
+    I --> J["✅ all txns matched"]
+
+    style A fill:#4a9,color:#fff
+    style D fill:#48c,color:#fff
+    style G fill:#e84,color:#fff
+    style J fill:#4a9,color:#fff
+```
+
+**How it works:**
+
+1. `model.cpp` pushes 500 randomized payloads through an `std::queue` (the "ideal FIFO") and dumps the input vectors + expected output to text files
+2. The testbench (`tb_fifo.v`) reads those vectors and applies them to the DUT with randomized `tvalid` (70% assertion rate) and `tready` (60%) to simulate realistic bus stalls
+3. The hardware output gets captured to `actual_output.txt`
+4. `test_runner.py` diffs expected vs actual line-by-line — if they match, the design is correct
+
+The randomized backpressure is the key part. It's easy to make a FIFO work when valid and ready are always high. The hard case is when the bus stalls mid-transfer, and the pointer logic has to hold state correctly.
+
+### Waveforms
+
+**AXI4-Stream handshake — write side with sideband signals:**
+
+![AXI4-Stream Handshake](docs/waveform_handshake.png)
+
+**Full signal view — backpressure and FIFO status flags:**
+
+![FIFO Status Flags](docs/waveform_status.png)
+
+## Running It
+
+Needs: `g++`, Python 3, and one of: Vivado, ModelSim, or Icarus Verilog. The test runner auto-detects your simulator.
+
 ```bash
 python test_runner.py
 ```
 
-If it prints `OK: all txns matched golden model`, the Verilog is mathematically sound and ready to be synthesized onto your target silicon.
+If everything passes:
+```
+OK: all txns matched golden model
+```
+
+## Repo Layout
+
+```
+├── fifo_sync_axi4s.v      RTL — the actual FIFO
+├── tb_fifo.v               Testbench — randomized AXI4-Stream driver
+├── model.cpp               Golden model — C++ std::queue reference
+├── test_runner.py           Orchestrator — compile, simulate, compare
+└── docs/                    Architecture diagram + waveform screenshots
+```
+
+## Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `DATA_WIDTH` | 32 | Payload width in bits |
+| `ADDR_WIDTH` | 4 | Address bits → depth is 2^ADDR_WIDTH (default 16) |
+| `PROG_FULL_THRESH` | 12 | `almost_full` asserts at this occupancy |
+| `PROG_EMPTY_THRESH` | 4 | `almost_empty` asserts at this occupancy |
 
 ---
-*Built with care for robust hardware pipelines. Drop a star or reach out if this saves you time fighting with vendor IP!*
+
+*If this saved you time, star the repo. If you find a bug, open an issue.*

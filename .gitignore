@@ -11,11 +11,20 @@ actual_output.txt
 dump.vcd
 *.vvp
 
-# ModelSim / QuestaSim working directories and logs
+# ModelSim / QuestaSim
 work/
 transcript
 *.wlf
 modelsim.ini
+
+# Vivado / xsim
+xsim.dir/
+*.log
+*.pb
+*.jou
+*.wdb
+*.str
+.Xil/
 
 # Python caches
 __pycache__/
